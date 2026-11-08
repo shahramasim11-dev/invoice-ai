@@ -11,6 +11,7 @@ from app.repositories.invoice_repository import InvoiceRepository
 from app.services.extractor.base_extractor import AbstractExtractor
 from app.services.storage.base_storage import AbstractStorage
 from app.services.validation.invoice_validator import InvoiceValidator
+from app.schemas.search import InvoiceSearchFilters
 
 
 class DuplicateInvoiceError(Exception):
@@ -64,3 +65,6 @@ class InvoiceService:
         if invoice is None:
             raise InvoiceNotFoundError(f"Invoice {invoice_id} not found.")
         return invoice
+
+    def search_invoices(self, filters: InvoiceSearchFilters) -> list[Invoice]:
+        return self._repository.search(filters)

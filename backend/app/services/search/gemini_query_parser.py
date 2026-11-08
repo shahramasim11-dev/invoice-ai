@@ -1,12 +1,12 @@
 import json
 from datetime import date
 
-from google import genai
-from google.genai import types
+from google.genai import errors, types
 from pydantic import ValidationError
 
-from app.core.config import get_settings
 from app.schemas.search import InvoiceSearchFilters
+from app.services.gemini_gateway import GeminiGateway
+from app.services.gemini_retry import RETRYABLE_CODES
 from app.services.search.base_query_parser import AbstractQueryParser, QueryParseError
 
 INSTRUCTIONS = """
@@ -39,23 +39,26 @@ Rules:
 
 
 class GeminiQueryParser(AbstractQueryParser):
-    def __init__(self, api_key: str | None = None, model: str | None = None):
-        settings = get_settings()
-        self._model = model or settings.gemini_model
-        self._client = genai.Client(api_key=api_key or settings.gemini_api_key)
+    def __init__(self, gateway: GeminiGateway):
+        self._gateway = gateway
 
     def parse(self, query: str, today: date) -> InvoiceSearchFilters:
         try:
-            response = self._client.models.generate_content(
-                model=self._model,
-                contents=f"Today's date: {today.isoformat()}\nSearch query: {query}",
-                config=types.GenerateContentConfig(
+            text = self._gateway.generate_text(
+                f"Today's date: {today.isoformat()}\nSearch query: {query}",
+                types.GenerateContentConfig(
                     system_instruction=INSTRUCTIONS,
                     response_mime_type="application/json",
                 ),
             )
-            return InvoiceSearchFilters(**json.loads(response.text))
+            return InvoiceSearchFilters(**json.loads(text))
         except (json.JSONDecodeError, ValidationError, TypeError) as e:
             raise QueryParseError(f"Could not understand that search: {e}") from e
+        except errors.APIError as e:
+            if e.code in RETRYABLE_CODES:
+                raise QueryParseError(
+                    "The AI service is busy right now. Please try again in a moment."
+                ) from e
+            raise QueryParseError(f"Search request failed: {e}") from e
         except Exception as e:
             raise QueryParseError(f"Search request failed: {e}") from e

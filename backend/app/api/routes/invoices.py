@@ -15,6 +15,7 @@ from app.services.invoice_service import (
 from app.services.storage.base_storage import StorageError
 from app.api.deps import get_exporters, get_invoice_service
 from app.services.export.base_exporter import AbstractExporter
+from app.schemas.search import InvoiceSearchFilters
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 
@@ -55,12 +56,11 @@ def list_invoices(
 @router.get("/export")
 def export_invoices(
     file_format: Literal["csv", "xlsx"] = Query(default="csv", alias="format"),
-    vendor: str | None = Query(default=None),
-    min_total: Decimal | None = Query(default=None),
+    filters: InvoiceSearchFilters = Depends(),
     service: InvoiceService = Depends(get_invoice_service),
     exporters: dict[str, AbstractExporter] = Depends(get_exporters),
 ):
-    invoices = service.list_invoices(vendor=vendor, min_total=min_total)
+    invoices = service.search_invoices(filters)
     exporter = exporters[file_format]
     return Response(
         content=exporter.export(invoices),

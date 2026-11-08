@@ -5,13 +5,13 @@ separate OCR step.
 """
 import json
 
-from google import genai
-from google.genai import types
+from google.genai import errors, types
 from pydantic import ValidationError
 
-from app.core.config import get_settings
 from app.schemas.invoice import ExtractedInvoiceData
 from app.services.extractor.base_extractor import AbstractExtractor, ExtractionError
+from app.services.gemini_gateway import GeminiGateway
+from app.services.gemini_retry import RETRYABLE_CODES
 
 EXTRACTION_PROMPT = """
 You are an invoice/receipt data extraction engine. Read the attached document
@@ -39,26 +39,26 @@ If a field is not present in the document, use null. Do not invent values.
 
 
 class GeminiExtractor(AbstractExtractor):
-    def __init__(self, api_key: str | None = None, model: str | None = None):
-        settings = get_settings()
-        self._model = model or settings.gemini_model
-        self._client = genai.Client(api_key=api_key or settings.gemini_api_key)
+    def __init__(self, gateway: GeminiGateway):
+        self._gateway = gateway
 
     def extract(self, file_bytes: bytes, mime_type: str) -> ExtractedInvoiceData:
         try:
-            response = self._client.models.generate_content(
-                model=self._model,
-                contents=[
+            text = self._gateway.generate_text(
+                [
                     types.Part.from_bytes(data=file_bytes, mime_type=mime_type),
                     EXTRACTION_PROMPT,
                 ],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json"
-                ),
+                types.GenerateContentConfig(response_mime_type="application/json"),
             )
-            data = json.loads(response.text)
-            return ExtractedInvoiceData(**data)
+            return ExtractedInvoiceData(**json.loads(text))
         except (json.JSONDecodeError, ValidationError, TypeError) as e:
             raise ExtractionError(f"Gemini returned unusable data: {e}") from e
+        except errors.APIError as e:
+            if e.code in RETRYABLE_CODES:
+                raise ExtractionError(
+                    "The AI service is busy right now. Please try again in a moment."
+                ) from e
+            raise ExtractionError(f"Gemini request failed: {e}") from e
         except Exception as e:
             raise ExtractionError(f"Gemini request failed: {e}") from e

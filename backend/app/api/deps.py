@@ -25,10 +25,15 @@ from app.services.search.base_query_parser import AbstractQueryParser
 from app.services.search.gemini_query_parser import GeminiQueryParser
 from app.services.search_service import SearchService
 
+from app.services.gemini_gateway import GeminiGateway
+
+@lru_cache
+def get_gateway() -> GeminiGateway:
+    return GeminiGateway.from_settings()
 
 @lru_cache
 def get_extractor() -> AbstractExtractor:
-    return GeminiExtractor()
+    return GeminiExtractor(get_gateway())
 
 @lru_cache
 def get_storage() -> AbstractStorage:
@@ -40,11 +45,12 @@ def get_validator() -> InvoiceValidator:
 
 @lru_cache
 def get_query_parser() -> AbstractQueryParser:
-    return GeminiQueryParser()
+    return GeminiQueryParser(get_gateway())
 
 @lru_cache
 def get_exporters() -> dict[str, AbstractExporter]:
     return {"csv": CsvExporter(), "xlsx": ExcelExporter()}
+
 
 def get_invoice_service(
     db: Session = Depends(get_db),
